@@ -1,0 +1,26 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: jeen_part2_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: jeen
+      POSTGRES_PASSWORD: jeen_dev_password
+      POSTGRES_DB: document_index
+    ports:
+      # Host port 5433, not 5432: a pre-existing local Postgres instance was
+      # found listening on 5432 during development. Using 5433 avoids the
+      # port conflict entirely rather than depending on that instance being
+      # stopped. The container's internal port is unaffected.
+      - "5433:5432"
+    volumes:
+      - jeen_part2_pgdata:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jeen -d document_index"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  jeen_part2_pgdata:
