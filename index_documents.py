@@ -9,6 +9,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from dotenv import load_dotenv
@@ -51,7 +52,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  received {len(embeddings)} embeddings, {len(embeddings[0])} dims each")
 
         print("Storing in Postgres ...")
-        import os
         filename = os.path.basename(args.file)
         with get_connection() as conn:
             count = insert_chunks(
