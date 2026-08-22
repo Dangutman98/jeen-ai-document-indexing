@@ -306,6 +306,25 @@ documented intent. Fixed by keeping sentences grouped by source paragraph
 through the packing step and treating each paragraph boundary as a hard
 chunk break. Covered by `test_sentence_never_bridges_paragraph_boundaries`.
 
+**A second real bug, found only by testing against real documents:** the
+synthetic sample docs in `docs/` are plain prose with no short standalone
+paragraphs, so they never exercised a real failure mode. Running the
+pipeline against real-world DOCX/PDF files (specs, syllabi, PRDs) with
+headings, table cells, and list items — each its own blank-line-separated
+paragraph — showed the paragraph-hard-break fix above had a side effect:
+every short paragraph became its own near-empty chunk. One real document
+produced 53 chunks under 15 characters out of 219 total, including chunks
+like `'Developer'`, `'Login'`, and a 4-character Hebrew chunk containing only
+`'צוות'` ("team") — each one a wasted embedding API call carrying essentially
+no retrievable meaning. Fixed with `_merge_undersized()` in
+`src/chunking.py`: any chunk under 30 characters folds into a neighbor
+(forward if one follows, backward otherwise), for both the `sentence` and
+`paragraph` strategies. Re-running the same real document afterward produced
+130 chunks, zero of them undersized. Not caught by any of the strategy-level
+unit tests above, precisely because they only used clean synthetic prose —
+a reminder that unit tests over synthetic fixtures and testing against real
+files are not substitutes for each other.
+
 ## Project structure
 
 ```

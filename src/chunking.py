@@ -11,6 +11,16 @@ from dataclasses import dataclass
 
 STRATEGIES = ("fixed", "sentence", "paragraph")
 
+# Real-world documents (as opposed to plain prose) are full of short
+# standalone paragraphs -- headings, table-cell text, form labels, list
+# items -- each separated by a blank line. Treating every paragraph
+# boundary as a hard chunk break (needed to avoid bridging unrelated
+# paragraphs) then means each of these becomes its own near-empty chunk,
+# e.g. a lone "Developer" or "Login" heading. That wastes an embedding API
+# call per fragment and pollutes search results with content-free matches.
+# Found by testing against real DOCX/PDF files, not the synthetic samples.
+MIN_CHUNK_CHARS = 30
+
 # A conservative sentence boundary: end punctuation followed by whitespace and
 # a capital/quote/digit. Avoids splitting on "Dr." or "e.g." in the common case
 # without pulling in a full NLP dependency for what is a best-effort splitter.
@@ -34,6 +44,34 @@ def chunk_text(text: str, strategy: str, *, chunk_size: int = 1000, overlap: int
         pieces = _chunk_paragraph(text, chunk_size=chunk_size)
 
     return [Chunk(text=t, index=i) for i, t in enumerate(pieces) if t.strip()]
+
+
+def _merge_undersized(chunks: list[str], *, min_chars: int = MIN_CHUNK_CHARS) -> list[str]:
+    """Fold any chunk shorter than min_chars into a neighbor.
+
+    A heading is folded into whatever follows it (that's usually what it
+    introduces); a trailing tiny fragment with nothing after it is folded
+    into whatever precedes it instead. Runs of several consecutive tiny
+    chunks (e.g. a stack of short labels) keep merging until the combined
+    piece clears the threshold or the list is exhausted.
+    """
+    if len(chunks) <= 1:
+        return chunks
+    out = list(chunks)
+    i = 0
+    while i < len(out) and len(out) > 1:
+        if len(out[i]) >= min_chars:
+            i += 1
+            continue
+        if i + 1 < len(out):
+            out[i + 1] = out[i] + " " + out[i + 1]
+            del out[i]
+            # re-check the merged result at this same position
+        else:
+            out[i - 1] = out[i - 1] + " " + out[i]
+            del out[i]
+            i -= 1
+    return out
 
 
 def _chunk_fixed(text: str, *, chunk_size: int, overlap: int) -> list[str]:
@@ -80,7 +118,7 @@ def _chunk_sentence(text: str, *, chunk_size: int) -> list[str]:
 
     if current:
         chunks.append(" ".join(current))
-    return chunks
+    return _merge_undersized(chunks)
 
 
 def _chunk_paragraph(text: str, *, chunk_size: int) -> list[str]:
@@ -104,4 +142,4 @@ def _chunk_paragraph(text: str, *, chunk_size: int) -> list[str]:
         current_len += len(para) + 2
     if current:
         chunks.append("\n\n".join(current))
-    return chunks
+    return _merge_undersized(chunks)

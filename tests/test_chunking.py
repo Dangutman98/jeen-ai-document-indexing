@@ -102,8 +102,12 @@ def test_sentence_longer_than_chunk_size_kept_whole():
 
 
 def test_sentence_hebrew_text_splits_correctly():
-    text = "זו משפט ראשון בעברית. וזה משפט שני בעברית. ומשפט שלישי."
-    chunks = chunk_text(text, "sentence", chunk_size=25)
+    text = (
+        "זהו משפט ראשון וארוך למדי בעברית שממלא מקום נאה. "
+        "וזהו משפט שני שגם הוא ארוך למדי ומשלים את הרעיון הכללי. "
+        "ומשפט שלישי שסוגר את הפסקה הזו בצורה נאותה וברורה."
+    )
+    chunks = chunk_text(text, "sentence", chunk_size=60)
     assert len(chunks) >= 2
     combined = " ".join(c.text for c in chunks)
     assert "משפט ראשון" in combined and "משפט שלישי" in combined
@@ -119,8 +123,12 @@ def test_sentence_no_terminal_punctuation_still_returns_chunk():
 # ---------------------------------------------------------------- paragraph
 
 def test_paragraph_splits_on_blank_lines():
-    text = "Para one line.\n\nPara two line.\n\nPara three line."
-    chunks = chunk_text(text, "paragraph", chunk_size=15)
+    text = (
+        "This is the first paragraph with enough content to stand alone.\n\n"
+        "This is the second paragraph, also long enough on its own.\n\n"
+        "This is the third and final paragraph, likewise substantial."
+    )
+    chunks = chunk_text(text, "paragraph", chunk_size=70)
     assert len(chunks) == 3
 
 
@@ -144,3 +152,52 @@ def test_paragraph_single_short_paragraph_no_fallback_needed():
     chunks = chunk_text(text, "paragraph", chunk_size=1000)
     assert len(chunks) == 1
     assert chunks[0].text == text
+
+
+# ---------------------------------------------------------------- undersized chunk merging
+# Real documents (headings, table cells, form labels, list items) produce many
+# short standalone paragraphs -- unlike the plain-prose synthetic test fixtures
+# above. Found via testing against real DOCX/PDF files from outside this repo.
+
+def test_sentence_strategy_merges_short_heading_into_following_content():
+    # "Title" alone is a paragraph; the real content follows in the next one.
+    # A hard hard paragraph-boundary chunk break would otherwise emit "Title"
+    # as its own near-empty, low-value chunk.
+    text = (
+        "Title\n\n"
+        "This is the actual substantial paragraph that follows the heading "
+        "and contains the real content a reader or a search query cares about."
+    )
+    chunks = chunk_text(text, "sentence", chunk_size=1000)
+    assert len(chunks) == 1
+    assert "Title" in chunks[0].text
+    assert "actual substantial paragraph" in chunks[0].text
+
+
+def test_sentence_strategy_no_chunk_below_minimum_on_realistic_short_paragraphs():
+    text = (
+        "Heading One\n\n"
+        "Role A\n\n"
+        "Role B\n\n"
+        "This final paragraph has enough real content to stand on its own "
+        "without needing to be merged with anything before it."
+    )
+    chunks = chunk_text(text, "sentence", chunk_size=1000)
+    assert all(len(c.text) >= 30 for c in chunks) or len(chunks) == 1
+    combined = " ".join(c.text for c in chunks)
+    for fragment in ["Heading One", "Role A", "Role B", "final paragraph"]:
+        assert fragment in combined
+
+
+def test_trailing_tiny_chunk_merges_backward_not_lost():
+    # A short paragraph at the very end has nothing after it to merge into,
+    # so it must fold into the previous chunk instead of being dropped.
+    text = (
+        "This is a long enough opening paragraph to be its own chunk on "
+        "its own merits, well past the minimum size threshold.\n\n"
+        "Fin"
+    )
+    chunks = chunk_text(text, "sentence", chunk_size=1000)
+    assert len(chunks) == 1
+    assert "Fin" in chunks[0].text
+    assert "opening paragraph" in chunks[0].text
