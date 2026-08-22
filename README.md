@@ -19,8 +19,7 @@ truncation — one of Google's own recommended output sizes, alongside 3072 and
 any non-default output size since the API does not renormalize truncated
 vectors itself. See [`src/embeddings.py`](src/embeddings.py). This lets the
 table carry a real HNSW index — confirmed in this repo with `EXPLAIN`, see
-[Verifying the index is actually used](#verifying-the-index-is-actually-used)
-below.
+[Verifying the HNSW index is real](#verifying-the-hnsw-index-is-real) below.
 
 ## Requirements
 
@@ -135,28 +134,9 @@ Top 3 result(s) for 'login issue':
     5. Account Access Changes
 ```
 
-```
-$ python search.py --query "billing dispute" --limit 3
-Embedding query: 'billing dispute'
-
-Top 3 result(s) for 'billing dispute':
-
-[1] similarity=0.7670  file=sample_support_procedures.docx  strategy=sentence  id=7
-    2. Billing Disputes
-
-[2] similarity=0.7150  file=sample_support_procedures.docx  strategy=sentence  id=8
-    A billing dispute should first be checked against the meter read
-    status. If the disputed bill was based on an estimated read rather
-    than an actual read, explain that estimates are corrected
-    automatically once a real read...
-
-[3] similarity=0.6175  file=sample_support_procedures.docx  strategy=sentence  id=9
-    3. Meter Reading Failures
-```
-
-The top result for each query is the section header chunk that actually
-discusses the topic — retrieval is correctly ranking relevance, not just
-returning arbitrary rows.
+The top result is the section header chunk that actually discusses the
+topic — retrieval is correctly ranking relevance, not just returning
+arbitrary rows.
 
 **Search results returned directly from the database** (not just through the
 CLI — a raw query against the table, confirming the data really is there
@@ -181,53 +161,22 @@ $ docker exec jeen_part2_postgres psql -U jeen -d document_index -c \
 (6 rows)
 ```
 
-### Verifying the index is real (and why `EXPLAIN` may not show it at this scale)
+### Verifying the HNSW index is real
 
-Running `EXPLAIN` on the exact query `search.py` executes — a literal vector
-bound as a query parameter, matching the real code path in `src/db.py`:
-
-```sql
-EXPLAIN SELECT id FROM document_chunks
-ORDER BY embedding <=> '[...]'::vector
-LIMIT 5;
-```
-
-On this repo's small demo table (a dozen or so rows from the sample docs),
-Postgres's planner correctly chooses a **sequential scan**, not the HNSW
-index:
+`EXPLAIN` on this repo's small demo table (a dozen-odd rows) shows Postgres's
+planner picking a plain **sequential scan** — correct, not a bug: walking a
+graph index has overhead not worth paying over a handful of rows. Forcing
+the index on (`SET enable_seqscan = off;`) proves it's real and working:
 
 ```
-Limit  (cost=23.39..23.40 rows=5 width=120)
-  ->  Sort  (cost=23.39..24.54 rows=460 width=120)
-        Sort Key: ((embedding <=> '[...]'::vector))
-        ->  Seq Scan on document_chunks  (cost=0.00..15.75 rows=460 width=120)
+Seq Scan on document_chunks  (cost=0.00..15.75 rows=460 width=120)              <- default plan
+Index Scan using document_chunks_embedding_hnsw_idx  (cost=72.37..137.20 ...)   <- forced on
 ```
 
-This is expected, correct planner behavior, not a bug — walking a graph index
-has fixed overhead that isn't worth paying when scanning a dozen rows
-directly is cheaper. The index exists and is genuinely usable; it simply
-isn't the cheaper plan yet at this table size. Forcing the planner to use it
-proves it's real and correct:
-
-```sql
-SET enable_seqscan = off;
-EXPLAIN SELECT id FROM document_chunks
-ORDER BY embedding <=> '[...]'::vector
-LIMIT 5;
-```
-
-```
-Limit  (cost=72.37..73.07 rows=5 width=16)
-  ->  Index Scan using document_chunks_embedding_hnsw_idx on document_chunks  (cost=72.37..137.20 rows=460 width=16)
-        Order By: (embedding <=> '[...]'::vector)
-```
-
-`Index Scan using document_chunks_embedding_hnsw_idx` confirms the index is
-real and functional. At a realistic corpus size (thousands of chunks,
-where a sequential scan is the expensive option), the planner will pick it
-automatically without needing `enable_seqscan` forced off — this is exactly
-the payoff of the 1536-dimension decision above: a 3072-dim column could
-never be indexed at all, at any scale.
+At a realistic corpus size (thousands of chunks, where sequential scan
+becomes the expensive option) the planner picks the index automatically,
+with nothing forced — exactly the payoff of the 1536-dimension decision
+above, since a 3072-dim column could never be indexed at any scale.
 
 ## Error handling
 
@@ -294,64 +243,6 @@ clean one-line error via `InvalidArgumentError`, instead of an uncaught
   attempt at semantically complete chunks the way the other two strategies
   are.
 
-## Running tests
-
-```bash
-pip install -r requirements-dev.txt
-pytest -v
-```
-
-55 tests across four layers:
-
-- **`tests/test_chunking.py`** — pure logic, no I/O: all three strategies,
-  overlap edge cases, empty/whitespace-only input, Hebrew text, sentences
-  longer than the chunk size, the paragraph-fallback behavior, the
-  undersized-chunk merge behavior, and invalid chunk-size/overlap arguments.
-- **`tests/test_extract.py`** — real temp PDF/DOCX files generated per test
-  (via `fpdf2`/`python-docx`): missing file, unsupported extension, empty
-  document, whitespace-only document, table-cell extraction, multi-page PDFs.
-- **`tests/test_embeddings.py`** — retry/backoff logic against a mocked
-  Gemini client (no real network calls, no real waiting): retries on 429,
-  does *not* retry on 400, exhausts retries and raises, batches large input
-  correctly. Plus real unit tests of the L2-renormalization math.
-- **`tests/test_integration.py`** — runs against the *real* Postgres and
-  Gemini API from `docker-compose.yml` (auto-skipped if `GEMINI_API_KEY` /
-  `POSTGRES_URL` aren't set): a full insert → embed → search round trip,
-  real embedding dimensionality/norm checks, and real DB connection-failure
-  handling.
-- **`tests/test_cli_validation.py`** — CLI-level argument validation: a bad
-  `--limit` fails with a clean error *before* spending an API call on it
-  (verified by mocking `embed_query` and asserting it's never called).
-
-**A real bug the test suite caught:** the original sentence-chunking
-implementation split sentences *within* each paragraph correctly, but then
-flattened all paragraphs' sentences into one list before packing them into
-chunks — silently discarding the paragraph boundaries it had just computed.
-With a large enough `chunk_size`, sentences from two unrelated paragraphs
-could end up merged into the same chunk, contradicting the function's own
-documented intent. Fixed by keeping sentences grouped by source paragraph
-through the packing step and treating each paragraph boundary as a hard
-chunk break. Covered by `test_sentence_never_bridges_paragraph_boundaries`.
-
-**A second real bug, found only by testing against real documents:** the
-synthetic sample docs in `docs/` are plain prose with no short standalone
-paragraphs, so they never exercised a real failure mode. Running the
-pipeline against real-world DOCX/PDF files (specs, syllabi, PRDs) with
-headings, table cells, and list items — each its own blank-line-separated
-paragraph — showed the paragraph-hard-break fix above had a side effect:
-every short paragraph became its own near-empty chunk. One real document
-produced 53 chunks under 15 characters out of 219 total, including chunks
-like `'Developer'`, `'Login'`, and a 4-character Hebrew chunk containing only
-`'צוות'` ("team") — each one a wasted embedding API call carrying essentially
-no retrievable meaning. Fixed with `_merge_undersized()` in
-`src/chunking.py`: any chunk under 30 characters folds into a neighbor
-(forward if one follows, backward otherwise), for both the `sentence` and
-`paragraph` strategies. Re-running the same real document afterward produced
-130 chunks, zero of them undersized. Not caught by any of the strategy-level
-unit tests above, precisely because they only used clean synthetic prose —
-a reminder that unit tests over synthetic fixtures and testing against real
-files are not substitutes for each other.
-
 ## Project structure
 
 ```
@@ -372,3 +263,18 @@ part2/
   requirements.txt
   requirements-dev.txt        # + pytest, fpdf2 (test-only)
 ```
+
+## Note on tests
+
+Not required by the assignment, but included: 55 pytest tests in `tests/`
+(unit tests for chunking/extraction/embeddings, plus real integration tests
+against the live Postgres + Gemini API). Run with:
+
+```bash
+pip install -r requirements-dev.txt
+pytest -v
+```
+
+They're also how two real bugs were actually found and fixed — not just
+theoretical edge cases — including one that only appeared when testing
+against real-world documents rather than this repo's synthetic samples.
