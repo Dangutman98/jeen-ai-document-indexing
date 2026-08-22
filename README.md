@@ -90,7 +90,7 @@ Two synthetic sample documents are included under `docs/` so the pipeline is
 testable without sourcing external files: `sample_tariff_guide.pdf` and
 `sample_support_procedures.docx`, both fictional IEC-style support content.
 
-**Indexing:**
+**Indexing (two files, two different strategies):**
 
 ```
 $ python index_documents.py --file ./docs/sample_tariff_guide.pdf --strategy paragraph
@@ -102,6 +102,16 @@ Generating embeddings via gemini-embedding-001 (3 chunks) ...
   received 3 embeddings, 1536 dims each
 Storing in Postgres ...
 Done. Inserted 3 rows for 'sample_tariff_guide.pdf' (strategy=paragraph).
+
+$ python index_documents.py --file ./docs/sample_support_procedures.docx --strategy sentence
+Extracting text from ./docs/sample_support_procedures.docx ...
+  extracted 2,533 characters
+Chunking with strategy='sentence' ...
+  produced 13 chunks
+Generating embeddings via gemini-embedding-001 (13 chunks) ...
+  received 13 embeddings, 1536 dims each
+Storing in Postgres ...
+Done. Inserted 13 rows for 'sample_support_procedures.docx' (strategy=sentence).
 ```
 
 **Searching:**
@@ -112,28 +122,64 @@ Embedding query: 'login issue'
 
 Top 3 result(s) for 'login issue':
 
-[1] similarity=0.6178  file=sample_support_procedures.docx  strategy=sentence  id=13
-    IEC Customer Support Procedures (Sample) 1. Login Issues If a customer
-    cannot log into the IEC self-service app, first confirm the account
-    number is correct and that the customer is using the number printed
-    at the top of...
+[1] similarity=0.7566  file=sample_support_procedures.docx  strategy=sentence  id=5
+    1. Login Issues
 
-[2] similarity=0.5913  file=sample_support_procedures.docx  strategy=fixed  id=16
-    IEC Customer Support Procedures (Sample)  1. Login Issues  If a
-    customer cannot log into the IEC self-service app, first confirm the
-    account number is correct and that the customer is using the number
-    printed at the top ...
+[2] similarity=0.6619  file=sample_support_procedures.docx  strategy=sentence  id=6
+    If a customer cannot log into the IEC self-service app, first confirm
+    the account number is correct and that the customer is using the
+    number printed at the top of their most recent bill, not their
+    national ID. Password ...
 
-[3] similarity=0.5880  file=sample_support_procedures.docx  strategy=sentence  id=14
-    When a meter has not been read for two or more consecutive billing
-    periods, this is classified as a meter reading failure. The customer
-    should be offered a self-reading submission through the app as an
-    interim fix, and a...
+[3] similarity=0.6119  file=sample_support_procedures.docx  strategy=sentence  id=13
+    5. Account Access Changes
 ```
 
-The top result is the chunk that actually discusses login — retrieval is
-working correctly across the `sentence`, `fixed`, and `paragraph` strategies
-in the same table.
+```
+$ python search.py --query "billing dispute" --limit 3
+Embedding query: 'billing dispute'
+
+Top 3 result(s) for 'billing dispute':
+
+[1] similarity=0.7670  file=sample_support_procedures.docx  strategy=sentence  id=7
+    2. Billing Disputes
+
+[2] similarity=0.7150  file=sample_support_procedures.docx  strategy=sentence  id=8
+    A billing dispute should first be checked against the meter read
+    status. If the disputed bill was based on an estimated read rather
+    than an actual read, explain that estimates are corrected
+    automatically once a real read...
+
+[3] similarity=0.6175  file=sample_support_procedures.docx  strategy=sentence  id=9
+    3. Meter Reading Failures
+```
+
+The top result for each query is the section header chunk that actually
+discusses the topic — retrieval is correctly ranking relevance, not just
+returning arbitrary rows.
+
+**Search results returned directly from the database** (not just through the
+CLI — a raw query against the table, confirming the data really is there
+with the right shape):
+
+```
+$ docker exec jeen_part2_postgres psql -U jeen -d document_index -c \
+    "SELECT id, filename, split_strategy, LEFT(chunk_text, 60) AS chunk_preview
+     FROM document_chunks ORDER BY id LIMIT 6;"
+
+ id |            filename            | split_strategy |                        chunk_preview
+----+---------------------------------+----------------+--------------------------------------------------------------
+  1 | sample_tariff_guide.pdf        | paragraph      | IEC Tariff and Solar Net-Metering Guide (Sample)            +
+    |                                 |                | 1. Standard
+  2 | sample_tariff_guide.pdf        | paragraph      | Solar Net-Metering                                          +
+    |                                 |                | Customers with a private solar installati
+  3 | sample_tariff_guide.pdf        | paragraph      | Chat agents must never                                      +
+    |                                 |                | confirm or schedule a disconnection o
+  4 | sample_support_procedures.docx | sentence       | IEC Customer Support Procedures (Sample)
+  5 | sample_support_procedures.docx | sentence       | 1. Login Issues
+  6 | sample_support_procedures.docx | sentence       | If a customer cannot log into the IEC self-service app, firs
+(6 rows)
+```
 
 ### Verifying the index is real (and why `EXPLAIN` may not show it at this scale)
 
