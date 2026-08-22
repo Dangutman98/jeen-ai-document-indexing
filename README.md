@@ -229,7 +229,7 @@ gap in this implementation.
 
 ```bash
 pip install -r requirements-dev.txt
-pytest tests/ -v
+pytest -v
 ```
 
 47 tests across three layers:
