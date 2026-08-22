@@ -135,26 +135,53 @@ The top result is the chunk that actually discusses login — retrieval is
 working correctly across the `sentence`, `fixed`, and `paragraph` strategies
 in the same table.
 
-### Verifying the index is actually used
+### Verifying the index is real (and why `EXPLAIN` may not show it at this scale)
+
+Running `EXPLAIN` on the exact query `search.py` executes — a literal vector
+bound as a query parameter, matching the real code path in `src/db.py`:
 
 ```sql
 EXPLAIN SELECT id FROM document_chunks
-ORDER BY embedding <=> (SELECT embedding FROM document_chunks LIMIT 1)
+ORDER BY embedding <=> '[...]'::vector
+LIMIT 5;
+```
+
+On this repo's small demo table (a dozen or so rows from the sample docs),
+Postgres's planner correctly chooses a **sequential scan**, not the HNSW
+index:
+
+```
+Limit  (cost=23.39..23.40 rows=5 width=120)
+  ->  Sort  (cost=23.39..24.54 rows=460 width=120)
+        Sort Key: ((embedding <=> '[...]'::vector))
+        ->  Seq Scan on document_chunks  (cost=0.00..15.75 rows=460 width=120)
+```
+
+This is expected, correct planner behavior, not a bug — walking a graph index
+has fixed overhead that isn't worth paying when scanning a dozen rows
+directly is cheaper. The index exists and is genuinely usable; it simply
+isn't the cheaper plan yet at this table size. Forcing the planner to use it
+proves it's real and correct:
+
+```sql
+SET enable_seqscan = off;
+EXPLAIN SELECT id FROM document_chunks
+ORDER BY embedding <=> '[...]'::vector
 LIMIT 5;
 ```
 
 ```
-Limit  (cost=10000000034.42..10000000035.01 rows=5 width=16)
-  InitPlan 1
-    ->  Limit  (cost=10000000000.00..10000000000.03 rows=1 width=32)
-          ->  Seq Scan on document_chunks document_chunks_1  ...
-  ->  Index Scan using document_chunks_embedding_hnsw_idx on document_chunks  (cost=34.38..89.20 rows=460 width=16)
-        Order By: (embedding <=> (InitPlan 1).col1)
+Limit  (cost=72.37..73.07 rows=5 width=16)
+  ->  Index Scan using document_chunks_embedding_hnsw_idx on document_chunks  (cost=72.37..137.20 rows=460 width=16)
+        Order By: (embedding <=> '[...]'::vector)
 ```
 
-`Index Scan using document_chunks_embedding_hnsw_idx` confirms the HNSW index
-is doing the work, not a full table scan — this is the payoff of the
-1536-dimension decision above.
+`Index Scan using document_chunks_embedding_hnsw_idx` confirms the index is
+real and functional. At a realistic corpus size (thousands of chunks,
+where a sequential scan is the expensive option), the planner will pick it
+automatically without needing `enable_seqscan` forced off — this is exactly
+the payoff of the 1536-dimension decision above: a 3072-dim column could
+never be indexed at all, at any scale.
 
 ## Error handling
 
