@@ -32,3 +32,13 @@ class DatabaseConnectionError(PipelineError):
 
 class EmptySearchResultError(PipelineError):
     pass
+
+
+class InvalidArgumentError(PipelineError, ValueError):
+    """Bad CLI argument values (chunk-size/overlap/limit combinations, etc).
+
+    Inherits ValueError too so existing call sites that already catch
+    ValueError (e.g. library callers of chunk_text() that aren't going
+    through the CLI) keep working unchanged, while the CLIs' `except
+    PipelineError` also catches it -- one raise satisfies both.
+    """

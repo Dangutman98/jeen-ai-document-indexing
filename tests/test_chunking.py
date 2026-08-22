@@ -64,6 +64,32 @@ def test_fixed_overlap_greater_than_chunk_size_raises():
         chunk_text("some text here", "fixed", chunk_size=50, overlap=80)
 
 
+def test_fixed_zero_chunk_size_raises_pipeline_error():
+    # Regression test: this used to bypass the CLI's clean-error-handling
+    # contract because a bare ValueError isn't caught by `except
+    # PipelineError` in index_documents.py's main(). InvalidArgumentError
+    # inherits both, so both this and the CLI catch it.
+    from src.errors import InvalidArgumentError, PipelineError
+    with pytest.raises(PipelineError):
+        chunk_text("some text here", "fixed", chunk_size=0, overlap=0)
+    with pytest.raises(InvalidArgumentError):
+        chunk_text("some text here", "fixed", chunk_size=0, overlap=0)
+
+
+def test_fixed_negative_overlap_raises_pipeline_error():
+    from src.errors import PipelineError
+    with pytest.raises(PipelineError):
+        chunk_text("some text here", "fixed", chunk_size=100, overlap=-5)
+
+
+def test_fixed_overlap_equal_to_chunk_size_is_a_pipeline_error():
+    # The two pre-existing tests above only assert ValueError; this locks
+    # in that the same raise also satisfies the CLI's `except PipelineError`.
+    from src.errors import PipelineError
+    with pytest.raises(PipelineError):
+        chunk_text("some text here", "fixed", chunk_size=50, overlap=50)
+
+
 def test_fixed_text_shorter_than_chunk_size_returns_one_chunk():
     chunks = chunk_text("short", "fixed", chunk_size=1000, overlap=100)
     assert len(chunks) == 1

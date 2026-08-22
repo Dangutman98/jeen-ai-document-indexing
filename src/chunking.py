@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from .errors import InvalidArgumentError
+
 STRATEGIES = ("fixed", "sentence", "paragraph")
 
 # Real-world documents (as opposed to plain prose) are full of short
@@ -75,8 +77,14 @@ def _merge_undersized(chunks: list[str], *, min_chars: int = MIN_CHUNK_CHARS) ->
 
 
 def _chunk_fixed(text: str, *, chunk_size: int, overlap: int) -> list[str]:
+    if chunk_size <= 0:
+        raise InvalidArgumentError(f"chunk_size must be positive, got {chunk_size}")
+    if overlap < 0:
+        raise InvalidArgumentError(f"overlap must not be negative, got {overlap}")
     if overlap >= chunk_size:
-        raise ValueError("overlap must be smaller than chunk_size")
+        raise InvalidArgumentError(
+            f"overlap ({overlap}) must be smaller than chunk_size ({chunk_size})"
+        )
     step = chunk_size - overlap
     return [text[i : i + chunk_size] for i in range(0, len(text), step)]
 

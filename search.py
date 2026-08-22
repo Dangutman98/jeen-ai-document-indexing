@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 from src.db import get_connection, search
 from src.embeddings import embed_query
-from src.errors import EmptySearchResultError, PipelineError
+from src.errors import EmptySearchResultError, InvalidArgumentError, PipelineError
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -30,6 +30,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
     try:
+        if args.limit <= 0:
+            raise InvalidArgumentError(f"--limit must be positive, got {args.limit}")
+
         print(f"Embedding query: {args.query!r}")
         query_embedding = embed_query(args.query)
 

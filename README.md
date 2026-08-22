@@ -250,6 +250,12 @@ table itself has zero rows (nothing has been indexed yet), not when a query
 merely has no strong match. This is standard vector-search behavior, not a
 gap in this implementation.
 
+**Beyond the six mandatory cases:** invalid CLI arguments (`--chunk-size 0`,
+`--overlap` ≥ `--chunk-size`, a negative or zero `--limit`) also fail with a
+clean one-line error via `InvalidArgumentError`, instead of an uncaught
+`ValueError`/database exception with a raw traceback. `--limit` is validated
+*before* the query is embedded, so a bad value never spends a real API call.
+
 ## Design notes
 
 - **Modules are single-purpose** (`extract.py`, `chunking.py`,
@@ -270,6 +276,23 @@ gap in this implementation.
   `task_type="RETRIEVAL_DOCUMENT"` and queries with `RETRIEVAL_QUERY"`,
   per Google's guidance for retrieval-quality embeddings — using the same
   task type for both would silently degrade match quality.
+- **Indexing a file is all-or-nothing per run.** `insert_chunks` uses one
+  `executemany` + one `commit()` — if any row in the batch fails, the whole
+  file's insert is rolled back, not partially applied. There is no partial-
+  insert cleanup path because there's nothing to clean up.
+- **Re-indexing the same file duplicates it — there is no upsert.** Running
+  `index_documents.py` twice on the same file (even with the same strategy)
+  inserts a second full set of rows rather than replacing the first. Out of
+  scope for this assignment; if this were a real system, `(filename,
+  split_strategy)` would need a delete-then-insert or a unique constraint
+  with `ON CONFLICT`.
+- **The `fixed` strategy's undersized-chunk merge (see below) does not
+  apply to it.** `_merge_undersized` only runs on `sentence` and
+  `paragraph` output. A `fixed`-strategy run can still end with a small
+  trailing chunk when the text length isn't a multiple of the step size —
+  intentional, since fixed-size chunking is a raw sliding window, not an
+  attempt at semantically complete chunks the way the other two strategies
+  are.
 
 ## Running tests
 
@@ -278,11 +301,12 @@ pip install -r requirements-dev.txt
 pytest -v
 ```
 
-47 tests across three layers:
+55 tests across four layers:
 
 - **`tests/test_chunking.py`** — pure logic, no I/O: all three strategies,
   overlap edge cases, empty/whitespace-only input, Hebrew text, sentences
-  longer than the chunk size, and the paragraph-fallback behavior.
+  longer than the chunk size, the paragraph-fallback behavior, the
+  undersized-chunk merge behavior, and invalid chunk-size/overlap arguments.
 - **`tests/test_extract.py`** — real temp PDF/DOCX files generated per test
   (via `fpdf2`/`python-docx`): missing file, unsupported extension, empty
   document, whitespace-only document, table-cell extraction, multi-page PDFs.
@@ -295,6 +319,9 @@ pytest -v
   `POSTGRES_URL` aren't set): a full insert → embed → search round trip,
   real embedding dimensionality/norm checks, and real DB connection-failure
   handling.
+- **`tests/test_cli_validation.py`** — CLI-level argument validation: a bad
+  `--limit` fails with a clean error *before* spending an API call on it
+  (verified by mocking `embed_query` and asserting it's never called).
 
 **A real bug the test suite caught:** the original sentence-chunking
 implementation split sentences *within* each paragraph correctly, but then
