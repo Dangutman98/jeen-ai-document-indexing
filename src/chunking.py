@@ -43,31 +43,41 @@ def _chunk_fixed(text: str, *, chunk_size: int, overlap: int) -> list[str]:
     return [text[i : i + chunk_size] for i in range(0, len(text), step)]
 
 
-def _split_sentences(text: str) -> list[str]:
-    # Sentence splitting operates within paragraphs so a chunk never silently
-    # bridges two unrelated paragraphs.
-    sentences: list[str] = []
+def _split_sentences_by_paragraph(text: str) -> list[list[str]]:
+    # Returns sentences grouped by source paragraph (not flattened) so the
+    # packing step below can keep paragraph boundaries as hard chunk breaks --
+    # a flat list would lose exactly the information needed for that.
+    paragraphs: list[list[str]] = []
     for para in text.split("\n\n"):
         para = para.strip()
         if not para:
             continue
-        sentences.extend(s.strip() for s in _SENTENCE_BOUNDARY.split(para) if s.strip())
-    return sentences
+        sentences = [s.strip() for s in _SENTENCE_BOUNDARY.split(para) if s.strip()]
+        if sentences:
+            paragraphs.append(sentences)
+    return paragraphs
 
 
 def _chunk_sentence(text: str, *, chunk_size: int) -> list[str]:
-    sentences = _split_sentences(text)
     chunks: list[str] = []
     current: list[str] = []
     current_len = 0
-    for sent in sentences:
-        # A single sentence longer than chunk_size is kept whole rather than
-        # cut mid-word -- sentence boundaries are the unit here, not characters.
-        if current and current_len + 1 + len(sent) > chunk_size:
+
+    for paragraph_sentences in _split_sentences_by_paragraph(text):
+        for sent in paragraph_sentences:
+            # A single sentence longer than chunk_size is kept whole rather
+            # than cut mid-word -- sentence boundaries are the unit here.
+            if current and current_len + 1 + len(sent) > chunk_size:
+                chunks.append(" ".join(current))
+                current, current_len = [], 0
+            current.append(sent)
+            current_len += len(sent) + 1
+        # Paragraph boundary is a hard break: never let the next paragraph's
+        # sentences merge into this chunk, even if there's room left.
+        if current:
             chunks.append(" ".join(current))
             current, current_len = [], 0
-        current.append(sent)
-        current_len += len(sent) + 1
+
     if current:
         chunks.append(" ".join(current))
     return chunks

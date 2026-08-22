@@ -225,6 +225,41 @@ gap in this implementation.
   per Google's guidance for retrieval-quality embeddings — using the same
   task type for both would silently degrade match quality.
 
+## Running tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest tests/ -v
+```
+
+47 tests across three layers:
+
+- **`tests/test_chunking.py`** — pure logic, no I/O: all three strategies,
+  overlap edge cases, empty/whitespace-only input, Hebrew text, sentences
+  longer than the chunk size, and the paragraph-fallback behavior.
+- **`tests/test_extract.py`** — real temp PDF/DOCX files generated per test
+  (via `fpdf2`/`python-docx`): missing file, unsupported extension, empty
+  document, whitespace-only document, table-cell extraction, multi-page PDFs.
+- **`tests/test_embeddings.py`** — retry/backoff logic against a mocked
+  Gemini client (no real network calls, no real waiting): retries on 429,
+  does *not* retry on 400, exhausts retries and raises, batches large input
+  correctly. Plus real unit tests of the L2-renormalization math.
+- **`tests/test_integration.py`** — runs against the *real* Postgres and
+  Gemini API from `docker-compose.yml` (auto-skipped if `GEMINI_API_KEY` /
+  `POSTGRES_URL` aren't set): a full insert → embed → search round trip,
+  real embedding dimensionality/norm checks, and real DB connection-failure
+  handling.
+
+**A real bug the test suite caught:** the original sentence-chunking
+implementation split sentences *within* each paragraph correctly, but then
+flattened all paragraphs' sentences into one list before packing them into
+chunks — silently discarding the paragraph boundaries it had just computed.
+With a large enough `chunk_size`, sentences from two unrelated paragraphs
+could end up merged into the same chunk, contradicting the function's own
+documented intent. Fixed by keeping sentences grouped by source paragraph
+through the packing step and treating each paragraph boundary as a hard
+chunk break. Covered by `test_sentence_never_bridges_paragraph_boundaries`.
+
 ## Project structure
 
 ```
@@ -240,6 +275,8 @@ part2/
     embeddings.py               # Gemini client, batching, retry, dim reduction
     db.py                        # pgvector storage + similarity search
     errors.py                     # typed exceptions for all 6 error cases
+  tests/                      # pytest suite -- unit + real integration tests
   .env.example
   requirements.txt
+  requirements-dev.txt        # + pytest, fpdf2 (test-only)
 ```

@@ -1,0 +1,5 @@
+# Dev-only dependencies -- not needed to run index_documents.py / search.py,
+# only to run the test suite (fpdf2 generates PDF fixtures for extraction tests).
+-r requirements.txt
+pytest==9.0.3
+fpdf2==2.8.8
