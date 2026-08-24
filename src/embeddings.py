@@ -103,4 +103,10 @@ def _embed_batch_with_retry(
 
 
 def embed_query(text: str) -> list[float]:
+    """Embed a single search query and return its vector.
+
+    Uses the RETRIEVAL_QUERY task type rather than RETRIEVAL_DOCUMENT:
+    Gemini embeds the two asymmetrically, and matching a query embedded as
+    a document measurably degrades similarity scores.
+    """
     return embed_texts([text], task_type="RETRIEVAL_QUERY")[0]

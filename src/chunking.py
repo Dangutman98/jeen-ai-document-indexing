@@ -36,6 +36,20 @@ class Chunk:
 
 
 def chunk_text(text: str, strategy: str, *, chunk_size: int = 1000, overlap: int = 150) -> list[Chunk]:
+    """Split `text` into chunks using one of the three supported strategies.
+
+    `strategy` is one of `STRATEGIES`: "fixed" (fixed-size windows with
+    `overlap` characters carried between them), "sentence" (packs whole
+    sentences up to `chunk_size`, never bridging a paragraph boundary), or
+    "paragraph" (packs whole paragraphs up to `chunk_size`). `overlap`
+    applies to the fixed strategy only.
+
+    Sizes are in characters, not tokens. Returns chunks in document order
+    with `index` assigned sequentially; empty chunks are dropped.
+
+    Raises `InvalidArgumentError` for an unusable chunk_size/overlap pair
+    and `ValueError` for an unknown strategy.
+    """
     if strategy not in STRATEGIES:
         raise ValueError(f"Unknown strategy '{strategy}'. Must be one of {STRATEGIES}")
     if strategy == "fixed":
