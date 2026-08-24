@@ -46,9 +46,9 @@ POSTGRES_URL=postgresql://jeen:jeen_dev_password@localhost:5433/document_index
 **Indexing:**
 
 ```bash
-python index_documents.py --file ./docs/example.pdf --strategy paragraph
-python index_documents.py --file ./docs/example.docx --strategy sentence
-python index_documents.py --file ./docs/example.docx --strategy fixed --chunk-size 800 --overlap 100
+python index_documents.py --file ./docs/sample_tariff_guide.pdf --strategy paragraph
+python index_documents.py --file ./docs/sample_support_procedures.docx --strategy sentence
+python index_documents.py --file ./docs/sample_support_procedures.docx --strategy fixed --chunk-size 800 --overlap 100
 ```
 
 `--strategy` is one of `fixed`, `sentence`, `paragraph`. `--chunk-size` and
