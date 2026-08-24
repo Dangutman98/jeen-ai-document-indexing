@@ -88,18 +88,20 @@ Embedding query: 'login issue'
 
 Top 3 result(s) for 'login issue':
 
-[1] similarity=0.7566  file=sample_support_procedures.docx  strategy=sentence  id=5
-    1. Login Issues
+[1] similarity=0.6937  file=sample_support_procedures.docx  strategy=sentence  id=5
+    1. Login Issues If a customer cannot log into the IEC self-service app, first confirm the account number is correct and that the customer is using the number printed at the top of their most recent bill, not their nation...
 
-[2] similarity=0.6619  file=sample_support_procedures.docx  strategy=sentence  id=6
-    If a customer cannot log into the IEC self-service app, first confirm
-    the account number is correct and that the customer is using the
-    number printed at the top of their most recent bill, not their
-    national ID. Password ...
+[2] similarity=0.6009  file=sample_support_procedures.docx  strategy=fixed  id=13
+    IEC Customer Support Procedures (Sample)  1. Login Issues  If a customer cannot log into the IEC self-service app, first confirm the account number is correct and that the customer is using the number printed at the top ...
 
-[3] similarity=0.6119  file=sample_support_procedures.docx  strategy=sentence  id=13
-    5. Account Access Changes
+[3] similarity=0.5833  file=sample_support_procedures.docx  strategy=fixed  id=15
+    billing issue.  4. Technical Support Escalation  Technical support requests that involve any physical hazard -- exposed wiring, burning smell, sparks, or a customer reporting shock -- must never be handled purely in chat...
 ```
+
+The same document indexed under two strategies produces different results
+for the same query, which is the point of supporting more than one: the
+sentence chunk scores highest because it isolates the relevant passage,
+while the fixed-size chunks dilute it with surrounding text.
 
 **Search results returned directly from the database:**
 
@@ -109,15 +111,15 @@ $ docker exec jeen_part2_postgres psql -U jeen -d document_index -c \
      FROM document_chunks ORDER BY id LIMIT 6;"
 
  id |            filename            | split_strategy |                        chunk_preview
-----+---------------------------------+----------------+--------------------------------------------------------------
+----+--------------------------------+----------------+--------------------------------------------------------------
   1 | sample_tariff_guide.pdf        | paragraph      | IEC Tariff and Solar Net-Metering Guide (Sample)            +
-    |                                 |                | 1. Standard
+    |                                |                | 1. Standard
   2 | sample_tariff_guide.pdf        | paragraph      | Solar Net-Metering                                          +
-    |                                 |                | Customers with a private solar installati
+    |                                |                | Customers with a private solar installati
   3 | sample_tariff_guide.pdf        | paragraph      | Chat agents must never                                      +
-    |                                 |                | confirm or schedule a disconnection o
+    |                                |                | confirm or schedule a disconnection o
   4 | sample_support_procedures.docx | sentence       | IEC Customer Support Procedures (Sample)
-  5 | sample_support_procedures.docx | sentence       | 1. Login Issues
-  6 | sample_support_procedures.docx | sentence       | If a customer cannot log into the IEC self-service app, firs
+  5 | sample_support_procedures.docx | sentence       | 1. Login Issues If a customer cannot log into the IEC self-s
+  6 | sample_support_procedures.docx | sentence       | 2. Billing Disputes A billing dispute should first be checke
 (6 rows)
 ```
